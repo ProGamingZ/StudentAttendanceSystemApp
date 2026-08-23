@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import {
   collection,
   doc,
@@ -21,6 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { db } from "../firebase/config";
 import { useNetworkSync } from "../hooks/useNetworkSync";
 import { addPunchToQueue, syncQueue } from "../services/syncService";
@@ -35,6 +37,8 @@ export default function ScannerScreen() {
   const user = userStr ? JSON.parse(userStr) : null;
 
   const isOnline = useNetworkSync();
+  const insets = useSafeAreaInsets();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -55,7 +59,7 @@ export default function ScannerScreen() {
         setSearchResults([]);
         setShowDropdown(false);
       }
-    }, 300); // 300ms debounce to limit Firestore reads
+    }, 300);
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
@@ -68,7 +72,6 @@ export default function ScannerScreen() {
       );
       const snapshot = await getDocs(q);
 
-      // Filter out non-students just in case
       const results = snapshot.docs
         .map((doc) => doc.data())
         .filter((user) => user.role !== "superadmin" && user.role !== "admin");
@@ -118,7 +121,6 @@ export default function ScannerScreen() {
     let currentPunches = {};
 
     try {
-      // 1. Fetch from Firestore if online
       if (isOnline) {
         const docRef = doc(db, "attendance_logs", docId);
         const docSnap = await getDoc(docRef);
@@ -127,7 +129,6 @@ export default function ScannerScreen() {
         }
       }
 
-      // 2. Merge with Offline Queue (so UI updates accurately if they just punched offline)
       const queueStr = await AsyncStorage.getItem("@attendance_queue");
       if (queueStr) {
         const queue = JSON.parse(queueStr);
@@ -222,107 +223,120 @@ export default function ScannerScreen() {
     !student || !isAfternoon || !hasAIn || hasAOut || !todayConfig?.a_out;
 
   return (
-    <View style={styles.container}>
-      <Text style={[styles.status, { color: isOnline ? "green" : "red" }]}>
-        {isOnline ? "🟢 Online" : "🔴 Offline Mode"}
-      </Text>
+    <View style={{ flex: 1, backgroundColor: "#121212" }}>
+      <StatusBar style="light" />
 
-      {/* SEARCH SECTION WITH AUTOCOMPLETE */}
-      <View style={styles.searchSection}>
-        <TextInput
-          style={styles.input}
-          placeholder="Type Student ID..."
-          value={searchQuery}
-          onChangeText={(text) => {
-            setSearchQuery(text);
-            if (student) {
-              setStudent(null);
-              setExistingPunches({});
-            }
-          }}
-        />
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: "#f5f5f5",
+            marginTop: insets.top,
+            marginBottom: insets.bottom + 10,
+          },
+        ]}
+      >
+        <Text style={[styles.status, { color: isOnline ? "green" : "red" }]}>
+          {isOnline ? "🟢 Online" : "🔴 Offline Mode"}
+        </Text>
 
-        {showDropdown && searchResults.length > 0 && (
-          <View style={styles.dropdown}>
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item) => item.student_id}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.dropdownItem}
-                  onPress={() => handleSelectStudent(item)}
-                >
-                  <Text style={styles.dropdownId}>{item.student_id}</Text>
-                  <Text style={styles.dropdownName}>
-                    {item.first_name} {item.last_name}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
+        {/* SEARCH SECTION WITH AUTOCOMPLETE */}
+        <View style={styles.searchSection}>
+          <TextInput
+            style={styles.input}
+            placeholder="Type Student ID..."
+            value={searchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              if (student) {
+                setStudent(null);
+                setExistingPunches({});
+              }
+            }}
+          />
+
+          {showDropdown && searchResults.length > 0 && (
+            <View style={styles.dropdown}>
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => item.student_id}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleSelectStudent(item)}
+                  >
+                    <Text style={styles.dropdownId}>{item.student_id}</Text>
+                    <Text style={styles.dropdownName}>
+                      {item.first_name} {item.last_name}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
+        </View>
+
+        {loading && (
+          <ActivityIndicator size="large" style={{ marginBottom: 15 }} />
         )}
-      </View>
 
-      {loading && (
-        <ActivityIndicator size="large" style={{ marginBottom: 15 }} />
-      )}
+        {/* PERMANENT PLACEHOLDER UI */}
+        <View style={styles.studentCard}>
+          {student && student.photo_url ? (
+            <Image source={{ uri: student.photo_url }} style={styles.photo} />
+          ) : (
+            <View style={styles.photoPlaceholder}>
+              <Text style={styles.photoText}>Photo</Text>
+            </View>
+          )}
 
-      {/* PERMANENT PLACEHOLDER UI */}
-      <View style={styles.studentCard}>
-        {student && student.photo_url ? (
-          <Image source={{ uri: student.photo_url }} style={styles.photo} />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoText}>Photo</Text>
-          </View>
-        )}
+          <Text style={styles.name}>
+            {student
+              ? `${student.first_name} ${student.last_name}`
+              : "Student Name"}
+          </Text>
+          <Text style={styles.details}>
+            {student ? student.student_id : "ID Number"}
+          </Text>
+          <Text style={styles.details}>
+            {student
+              ? `${student.program} - Year ${student.year} Section ${student.section}`
+              : "Program - Year - Section"}
+          </Text>
 
-        <Text style={styles.name}>
-          {student
-            ? `${student.first_name} ${student.last_name}`
-            : "Student Name"}
-        </Text>
-        <Text style={styles.details}>
-          {student ? student.student_id : "ID Number"}
-        </Text>
-        <Text style={styles.details}>
-          {student
-            ? `${student.program} - Year ${student.year} Section ${student.section}`
-            : "Program - Year - Section"}
-        </Text>
-
-        {/* DYNAMIC TIME-BASED BUTTONS */}
-        <View style={styles.grid}>
-          <View style={styles.gridItem}>
-            <Button
-              title={hasMIn ? "M IN (Done)" : "Morning IN"}
-              disabled={mInDisabled}
-              onPress={() => handlePunch("m_in")}
-            />
-          </View>
-          <View style={styles.gridItem}>
-            <Button
-              title={hasMOut ? "M OUT (Done)" : "Morning OUT"}
-              disabled={mOutDisabled}
-              onPress={() => handlePunch("m_out")}
-              color="#ff5c5c"
-            />
-          </View>
-          <View style={styles.gridItem}>
-            <Button
-              title={hasAIn ? "A IN (Done)" : "Afternoon IN"}
-              disabled={aInDisabled}
-              onPress={() => handlePunch("a_in")}
-            />
-          </View>
-          <View style={styles.gridItem}>
-            <Button
-              title={hasAOut ? "A OUT (Done)" : "Afternoon OUT"}
-              disabled={aOutDisabled}
-              onPress={() => handlePunch("a_out")}
-              color="#ff5c5c"
-            />
+          {/* DYNAMIC TIME-BASED BUTTONS */}
+          <View style={styles.grid}>
+            <View style={styles.gridItem}>
+              <Button
+                title={hasMIn ? "M IN (Done)" : "Morning IN"}
+                disabled={mInDisabled}
+                onPress={() => handlePunch("m_in")}
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <Button
+                title={hasMOut ? "M OUT (Done)" : "Morning OUT"}
+                disabled={mOutDisabled}
+                onPress={() => handlePunch("m_out")}
+                color="#ff5c5c"
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <Button
+                title={hasAIn ? "A IN (Done)" : "Afternoon IN"}
+                disabled={aInDisabled}
+                onPress={() => handlePunch("a_in")}
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <Button
+                title={hasAOut ? "A OUT (Done)" : "Afternoon OUT"}
+                disabled={aOutDisabled}
+                onPress={() => handlePunch("a_out")}
+                color="#ff5c5c"
+              />
+            </View>
           </View>
         </View>
       </View>
@@ -331,7 +345,7 @@ export default function ScannerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 15, backgroundColor: "#f5f5f5" },
+  container: { flex: 1, padding: 15 },
   status: { fontWeight: "bold", alignSelf: "center", marginBottom: 10 },
 
   searchSection: { marginBottom: 20, position: "relative", zIndex: 10 },
@@ -342,6 +356,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "white",
     fontSize: 16,
+    color: "black",
   },
 
   dropdown: {
@@ -387,7 +402,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   photoText: { color: "#888", fontWeight: "bold" },
-  name: { fontSize: 22, fontWeight: "bold", marginBottom: 5 },
+  name: { fontSize: 22, fontWeight: "bold", marginBottom: 5, color: "#000" },
   details: { fontSize: 16, color: "#555", marginBottom: 5 },
 
   grid: {
